@@ -1,21 +1,18 @@
 """
 pipeline/stages.py
 ------------------
-Four placeholder pipeline stage functions.
+Pipeline stage gateway — the single import surface for all four stages.
 
-None of these make LLM calls.  They construct and return hardcoded example
-instances of the Pydantic models to prove end-to-end data flow.
-
-The example domain is a minimal CRM: Contacts managed by admins.
+Stages 1 and 2 (extract_intent, design_architecture) delegate to their own
+modules (pipeline/intent.py, pipeline/architecture.py) which make real Groq
+calls.  Stages 3 and 4 (generate_schemas, refine) remain as hardcoded
+placeholders until their respective pipeline modules are implemented.
 """
 
 from __future__ import annotations
 
-from schemas.intent import IntentModel, EntityMention, RoleMention, Ambiguity
-from schemas.architecture import (
-    ArchitectureModel, ArchEntity, EntityRelation, ArchRole,
-    UserFlow, RelationType,
-)
+from schemas.intent import IntentModel
+from schemas.architecture import ArchitectureModel
 from schemas.ui import (
     UISchema, UIPage, UIComponent, FormFieldComponent,
     PageType, ComponentType, FormFieldType, Gate, GateKind,
@@ -46,40 +43,13 @@ def extract_intent(raw_text: str) -> IntentModel:
 
 def design_architecture(intent: IntentModel) -> ArchitectureModel:
     """
-    Placeholder: translate an IntentModel into an ArchitectureModel.
+    Real implementation lives in pipeline/architecture.py (uses Groq API).
 
-    Resolves entity relationships and defines user flows.
+    This thin wrapper imports and delegates to it, keeping stages.py as
+    the single import surface for the rest of the pipeline.
     """
-    return ArchitectureModel(
-        entities=[
-            ArchEntity(name="Contact", attributes=["id", "name", "email", "phone", "created_at"]),
-        ],
-        relations=[],
-        roles=[
-            ArchRole(name="admin", description="Full control over contacts."),
-            ArchRole(name="viewer", description="Read-only access to contacts."),
-        ],
-        flows=[
-            UserFlow(
-                name="createContact",
-                actor="admin",
-                steps=[
-                    "Navigate to /contacts",
-                    "Click 'New Contact'",
-                    "Fill in name, email, phone",
-                    "Submit form → POST /contacts",
-                ],
-            ),
-            UserFlow(
-                name="viewContacts",
-                actor="viewer",
-                steps=[
-                    "Navigate to /contacts",
-                    "View contact list → GET /contacts",
-                ],
-            ),
-        ],
-    )
+    from pipeline.architecture import design_architecture as _real_design_architecture
+    return _real_design_architecture(intent)
 
 
 # ---------------------------------------------------------------------------

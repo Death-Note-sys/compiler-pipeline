@@ -159,19 +159,22 @@ def extract_intent(raw_text: str) -> IntentModel:
     # ── First attempt ────────────────────────────────────────────────────────
     raw_response = chat_json(messages, model=_MODEL, temperature=_TEMPERATURE)
 
+    first_error: json.JSONDecodeError | ValidationError | None = None
     try:
         intent = _parse_and_validate(raw_response)
         logger.info("extract_intent | first attempt succeeded | repair_needed=False")
         return intent
 
-    except (json.JSONDecodeError, ValidationError) as first_error:
+    except (json.JSONDecodeError, ValidationError) as exc:
+        first_error = exc          # capture before Python deletes the as-binding
         logger.warning(
             "extract_intent | first attempt failed (%s: %s) — attempting repair",
-            type(first_error).__name__,
-            str(first_error)[:200],
+            type(exc).__name__,
+            str(exc)[:200],
         )
 
     # ── Repair attempt ───────────────────────────────────────────────────────
+    assert first_error is not None  # always true here; satisfies type checkers
     if isinstance(first_error, ValidationError):
         repair_messages = _build_repair_messages(raw_text, raw_response, first_error)
     else:
