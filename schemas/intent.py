@@ -9,28 +9,10 @@ the compiler-schema-contract skill. Do not add types outside that contract.
 
 from __future__ import annotations
 
-from enum import Enum
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
-
-# ---------------------------------------------------------------------------
-# Closed vocabularies
-# ---------------------------------------------------------------------------
-
-class FeatureFlag(str, Enum):
-    """Top-level product features extracted from natural language."""
-    auth = "auth"
-    crud = "crud"
-    dashboard = "dashboard"
-    search = "search"
-    notifications = "notifications"
-    payments = "payments"
-    analytics = "analytics"
-    file_upload = "file_upload"
-    roles = "roles"
-    api_integration = "api_integration"
 
 
 # ---------------------------------------------------------------------------
@@ -78,9 +60,13 @@ class IntentModel(BaseModel):
         default_factory=list,
         description="Access roles inferred from the raw text.",
     )
-    features: List[FeatureFlag] = Field(
+    features: List[str] = Field(
         default_factory=list,
-        description="High-level feature flags extracted from the raw text.",
+        description=(
+            "High-level feature labels extracted from the raw text (free-text strings). "
+            "Closed-vocabulary enforcement happens at the Schema Generation layer, "
+            "not here."
+        ),
     )
     ambiguities: List[Ambiguity] = Field(
         default_factory=list,

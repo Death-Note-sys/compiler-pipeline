@@ -11,7 +11,7 @@ The example domain is a minimal CRM: Contacts managed by admins.
 
 from __future__ import annotations
 
-from schemas.intent import IntentModel, EntityMention, RoleMention, FeatureFlag, Ambiguity
+from schemas.intent import IntentModel, EntityMention, RoleMention, Ambiguity
 from schemas.architecture import (
     ArchitectureModel, ArchEntity, EntityRelation, ArchRole,
     UserFlow, RelationType,
@@ -31,28 +31,13 @@ from schemas.auth import AuthSchema, Role, Permission, PermissionAction, Permiss
 
 def extract_intent(raw_text: str) -> IntentModel:
     """
-    Placeholder: parse the user's raw NL request into an IntentModel.
+    Real implementation lives in pipeline/intent.py (uses Groq API).
 
-    In production this will call an LLM.  For now it returns a fixed
-    example derived from a simple CRM prompt.
+    This thin wrapper imports and delegates to it, keeping stages.py as
+    the single import surface for the rest of the pipeline.
     """
-    return IntentModel(
-        raw_text=raw_text,
-        entities=[
-            EntityMention(name="Contact", attributes=["name", "email", "phone"]),
-        ],
-        roles=[
-            RoleMention(name="admin"),
-            RoleMention(name="viewer"),
-        ],
-        features=[FeatureFlag.auth, FeatureFlag.crud, FeatureFlag.roles],
-        ambiguities=[
-            Ambiguity(
-                field="company",
-                message="Should Contact have a related Company entity, or just a string field?",
-            )
-        ],
-    )
+    from pipeline.intent import extract_intent as _real_extract_intent
+    return _real_extract_intent(raw_text)
 
 
 # ---------------------------------------------------------------------------

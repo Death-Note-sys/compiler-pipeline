@@ -1,13 +1,25 @@
 """
 tests/test_pipeline.py
 -----------------------
-Tests that pipeline/stages.py's four placeholder functions return objects
+Tests that pipeline/stages.py's four stage functions return objects
 that validate against the Pydantic schemas and flow correctly end-to-end.
+
+Stage 1 (extract_intent) now makes real Groq API calls, so these tests are
+skipped automatically when GROQ_API_KEY is not set.
 """
 
 from __future__ import annotations
 
+import os
+
 import pytest
+
+GROQ_API_KEY_PRESENT = bool(os.environ.get("GROQ_API_KEY"))
+
+pytestmark = pytest.mark.skipif(
+    not GROQ_API_KEY_PRESENT,
+    reason="GROQ_API_KEY not set — skipping pipeline integration tests",
+)
 
 from pipeline.stages import extract_intent, design_architecture, generate_schemas, refine
 from schemas.intent import IntentModel
