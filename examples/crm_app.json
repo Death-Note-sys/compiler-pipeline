@@ -1,0 +1,178 @@
+{
+  "intent": {
+    "raw_text": "Build a CRM where admins can manage contacts (name, email, phone) and viewers can read them.",
+    "entities": [
+      {"name": "Contact", "attributes": ["name", "email", "phone"]}
+    ],
+    "roles": [
+      {"name": "admin"},
+      {"name": "viewer"}
+    ],
+    "features": ["auth", "crud", "roles"],
+    "ambiguities": []
+  },
+  "architecture": {
+    "entities": [
+      {
+        "name": "Contact",
+        "attributes": ["id", "name", "email", "phone", "created_at"]
+      }
+    ],
+    "relations": [],
+    "roles": [
+      {"name": "admin", "description": "Full CRUD on contacts."},
+      {"name": "viewer", "description": "Read-only access to contacts."}
+    ],
+    "flows": [
+      {
+        "name": "createContact",
+        "actor": "admin",
+        "steps": [
+          "Navigate to /contacts",
+          "Click New Contact",
+          "Fill form and submit"
+        ]
+      },
+      {
+        "name": "viewContacts",
+        "actor": "viewer",
+        "steps": [
+          "Navigate to /contacts",
+          "View contact list"
+        ]
+      }
+    ]
+  },
+  "ui": {
+    "pages": [
+      {
+        "name": "ContactList",
+        "page_type": "list",
+        "route": "/contacts",
+        "gate": {"kind": "role_gate", "allowed_roles": ["admin", "viewer"], "plan": null},
+        "components": [
+          {
+            "component_type": "nav_bar",
+            "name": "main_nav",
+            "fields": [],
+            "gate": {"kind": "none", "allowed_roles": [], "plan": null},
+            "children": []
+          },
+          {
+            "component_type": "table",
+            "name": "contacts_table",
+            "fields": ["id", "name", "email", "phone"],
+            "gate": {"kind": "none", "allowed_roles": [], "plan": null},
+            "children": []
+          }
+        ]
+      },
+      {
+        "name": "ContactForm",
+        "page_type": "form",
+        "route": "/contacts/new",
+        "gate": {"kind": "role_gate", "allowed_roles": ["admin"], "plan": null},
+        "components": [
+          {
+            "component_type": "form_field",
+            "name": "name",
+            "field_type": "text",
+            "label": "Full Name",
+            "required": true
+          },
+          {
+            "component_type": "form_field",
+            "name": "email",
+            "field_type": "email",
+            "label": "Email",
+            "required": true
+          },
+          {
+            "component_type": "form_field",
+            "name": "phone",
+            "field_type": "text",
+            "label": "Phone",
+            "required": false
+          }
+        ]
+      }
+    ]
+  },
+  "api": {
+    "endpoints": [
+      {
+        "path": "/contacts",
+        "method": "GET",
+        "pattern": "crud_list",
+        "request_fields": [],
+        "response_fields": [
+          {"name": "id", "field_type": "uuid", "required": true, "computed": false},
+          {"name": "name", "field_type": "string", "required": true, "computed": false},
+          {"name": "email", "field_type": "string", "required": true, "computed": false},
+          {"name": "phone", "field_type": "string", "required": false, "computed": false}
+        ],
+        "gate": {"kind": "role_gate", "allowed_roles": ["admin", "viewer"], "plan": null}
+      },
+      {
+        "path": "/contacts",
+        "method": "POST",
+        "pattern": "crud_create",
+        "request_fields": [
+          {"name": "name", "field_type": "string", "required": true, "computed": false},
+          {"name": "email", "field_type": "string", "required": true, "computed": false},
+          {"name": "phone", "field_type": "string", "required": false, "computed": false}
+        ],
+        "response_fields": [
+          {"name": "id", "field_type": "uuid", "required": true, "computed": false},
+          {"name": "name", "field_type": "string", "required": true, "computed": false},
+          {"name": "email", "field_type": "string", "required": true, "computed": false},
+          {"name": "phone", "field_type": "string", "required": false, "computed": false},
+          {"name": "created_at", "field_type": "datetime", "required": true, "computed": false}
+        ],
+        "gate": {"kind": "role_gate", "allowed_roles": ["admin"], "plan": null}
+      },
+      {
+        "path": "/contacts/{id}",
+        "method": "DELETE",
+        "pattern": "crud_delete",
+        "request_fields": [],
+        "response_fields": [],
+        "gate": {"kind": "role_gate", "allowed_roles": ["admin"], "plan": null}
+      }
+    ]
+  },
+  "db": {
+    "tables": [
+      {
+        "name": "contacts",
+        "columns": [
+          {"name": "id", "type": "uuid", "nullable": false, "foreign_key": null},
+          {"name": "name", "type": "string", "nullable": false, "foreign_key": null},
+          {"name": "email", "type": "string", "nullable": false, "foreign_key": null},
+          {"name": "phone", "type": "string", "nullable": true, "foreign_key": null},
+          {"name": "created_at", "type": "datetime", "nullable": false, "foreign_key": null}
+        ]
+      }
+    ]
+  },
+  "auth": {
+    "roles": [
+      {
+        "name": "admin",
+        "permissions": [
+          {"resource": "Contact", "action": "manage"}
+        ]
+      },
+      {
+        "name": "viewer",
+        "permissions": [
+          {"resource": "Contact", "action": "read"}
+        ]
+      }
+    ],
+    "permission_matrix": [
+      {"role": "admin", "resource": "Contact", "action": "manage"},
+      {"role": "viewer", "resource": "Contact", "action": "read"}
+    ]
+  }
+}

@@ -1,0 +1,189 @@
+{
+  "intent": {
+    "raw_text": "Build a simple todo app where users can create, complete, and delete their own tasks.",
+    "entities": [
+      {"name": "Task", "attributes": ["title", "completed", "due_date"]}
+    ],
+    "roles": [
+      {"name": "user"}
+    ],
+    "features": ["auth", "crud"],
+    "ambiguities": [
+      {
+        "field": "due_date",
+        "message": "Should due_date be mandatory or optional?"
+      }
+    ]
+  },
+  "architecture": {
+    "entities": [
+      {
+        "name": "Task",
+        "attributes": ["id", "title", "completed", "due_date", "created_at", "owner_id"]
+      }
+    ],
+    "relations": [],
+    "roles": [
+      {"name": "user", "description": "Owns and manages their own tasks."}
+    ],
+    "flows": [
+      {
+        "name": "createTask",
+        "actor": "user",
+        "steps": [
+          "Navigate to /tasks",
+          "Fill in title and optional due date",
+          "Submit → POST /tasks"
+        ]
+      },
+      {
+        "name": "completeTask",
+        "actor": "user",
+        "steps": [
+          "View task list → GET /tasks",
+          "Click checkbox → PATCH /tasks/{id}"
+        ]
+      },
+      {
+        "name": "deleteTask",
+        "actor": "user",
+        "steps": [
+          "Click delete button → DELETE /tasks/{id}"
+        ]
+      }
+    ]
+  },
+  "ui": {
+    "pages": [
+      {
+        "name": "TaskList",
+        "page_type": "list",
+        "route": "/tasks",
+        "gate": {"kind": "role_gate", "allowed_roles": ["user"], "plan": null},
+        "components": [
+          {
+            "component_type": "table",
+            "name": "tasks_table",
+            "fields": ["id", "title", "completed", "due_date"],
+            "gate": {"kind": "none", "allowed_roles": [], "plan": null},
+            "children": []
+          },
+          {
+            "component_type": "button",
+            "name": "new_task_button",
+            "fields": [],
+            "gate": {"kind": "none", "allowed_roles": [], "plan": null},
+            "children": []
+          }
+        ]
+      },
+      {
+        "name": "TaskForm",
+        "page_type": "form",
+        "route": "/tasks/new",
+        "gate": {"kind": "role_gate", "allowed_roles": ["user"], "plan": null},
+        "components": [
+          {
+            "component_type": "form_field",
+            "name": "title",
+            "field_type": "text",
+            "label": "Task Title",
+            "required": true
+          },
+          {
+            "component_type": "form_field",
+            "name": "due_date",
+            "field_type": "date",
+            "label": "Due Date",
+            "required": false
+          }
+        ]
+      }
+    ]
+  },
+  "api": {
+    "endpoints": [
+      {
+        "path": "/tasks",
+        "method": "GET",
+        "pattern": "crud_list",
+        "request_fields": [],
+        "response_fields": [
+          {"name": "id", "field_type": "uuid", "required": true, "computed": false},
+          {"name": "title", "field_type": "string", "required": true, "computed": false},
+          {"name": "completed", "field_type": "boolean", "required": true, "computed": false},
+          {"name": "due_date", "field_type": "date", "required": false, "computed": false}
+        ],
+        "gate": {"kind": "role_gate", "allowed_roles": ["user"], "plan": null}
+      },
+      {
+        "path": "/tasks",
+        "method": "POST",
+        "pattern": "crud_create",
+        "request_fields": [
+          {"name": "title", "field_type": "string", "required": true, "computed": false},
+          {"name": "due_date", "field_type": "date", "required": false, "computed": false}
+        ],
+        "response_fields": [
+          {"name": "id", "field_type": "uuid", "required": true, "computed": false},
+          {"name": "title", "field_type": "string", "required": true, "computed": false},
+          {"name": "completed", "field_type": "boolean", "required": true, "computed": false},
+          {"name": "due_date", "field_type": "date", "required": false, "computed": false},
+          {"name": "created_at", "field_type": "datetime", "required": true, "computed": false},
+          {"name": "owner_id", "field_type": "uuid", "required": true, "computed": false}
+        ],
+        "gate": {"kind": "role_gate", "allowed_roles": ["user"], "plan": null}
+      },
+      {
+        "path": "/tasks/{id}",
+        "method": "PUT",
+        "pattern": "crud_update",
+        "request_fields": [
+          {"name": "completed", "field_type": "boolean", "required": false, "computed": false}
+        ],
+        "response_fields": [
+          {"name": "id", "field_type": "uuid", "required": true, "computed": false},
+          {"name": "title", "field_type": "string", "required": true, "computed": false},
+          {"name": "completed", "field_type": "boolean", "required": true, "computed": false}
+        ],
+        "gate": {"kind": "role_gate", "allowed_roles": ["user"], "plan": null}
+      },
+      {
+        "path": "/tasks/{id}",
+        "method": "DELETE",
+        "pattern": "crud_delete",
+        "request_fields": [],
+        "response_fields": [],
+        "gate": {"kind": "role_gate", "allowed_roles": ["user"], "plan": null}
+      }
+    ]
+  },
+  "db": {
+    "tables": [
+      {
+        "name": "tasks",
+        "columns": [
+          {"name": "id", "type": "uuid", "nullable": false, "foreign_key": null},
+          {"name": "title", "type": "string", "nullable": false, "foreign_key": null},
+          {"name": "completed", "type": "boolean", "nullable": false, "foreign_key": null},
+          {"name": "due_date", "type": "date", "nullable": true, "foreign_key": null},
+          {"name": "created_at", "type": "datetime", "nullable": false, "foreign_key": null},
+          {"name": "owner_id", "type": "uuid", "nullable": false, "foreign_key": null}
+        ]
+      }
+    ]
+  },
+  "auth": {
+    "roles": [
+      {
+        "name": "user",
+        "permissions": [
+          {"resource": "Task", "action": "manage"}
+        ]
+      }
+    ],
+    "permission_matrix": [
+      {"role": "user", "resource": "Task", "action": "manage"}
+    ]
+  }
+}
