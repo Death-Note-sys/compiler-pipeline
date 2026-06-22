@@ -20,18 +20,21 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
 from typing import Any
 
 from pydantic import ValidationError
 
 from llm.groq_client import chat_json
 from pipeline.errors import PipelineStageError
+from pipeline.results import SchemasResult  # canonical definition
 from schemas.api import APISchema, PATTERN_METHOD_MAP
 from schemas.architecture import ArchitectureModel
 from schemas.auth import AuthSchema
 from schemas.db import DBSchema
 from schemas.ui import UISchema
+
+# Re-export so existing "from pipeline.schema_gen import SchemasResult" callers keep working
+__all__ = ["generate_schemas", "SchemasResult"]
 
 logger = logging.getLogger(__name__)
 
@@ -41,18 +44,6 @@ logger = logging.getLogger(__name__)
 
 _MODEL = "llama-3.3-70b-versatile"
 _TEMPERATURE = 0.0
-
-# ---------------------------------------------------------------------------
-# Named result container
-# ---------------------------------------------------------------------------
-
-@dataclass(frozen=True)
-class SchemasResult:
-    """Named container for the four generated schemas — no positional ordering bugs."""
-    db: DBSchema
-    api: APISchema
-    auth: AuthSchema
-    ui: UISchema
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

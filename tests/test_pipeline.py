@@ -1,46 +1,33 @@
 """
 tests/test_pipeline.py
 -----------------------
-Tests that pipeline/stages.py's four stage functions return objects
-that validate against the Pydantic schemas and flow correctly end-to-end.
+Tests that pipeline/stages.py's four stage functions return correctly typed
+objects and flow end-to-end.
 
-Stage 1 (extract_intent) now makes real Groq API calls, so these tests are
-skipped automatically when GROQ_API_KEY is not set.
+All tests in this file use static fixtures from conftest.py (JSON files on
+disk) — zero LLM calls, runs in under a second.
 """
 
 from __future__ import annotations
 
-import os
+import copy
 
 import pytest
 
-GROQ_API_KEY_PRESENT = bool(os.environ.get("GROQ_API_KEY"))
-
-pytestmark = pytest.mark.skipif(
-    not GROQ_API_KEY_PRESENT,
-    reason="GROQ_API_KEY not set — skipping pipeline integration tests",
-)
-
-from pipeline.stages import extract_intent, design_architecture, generate_schemas, refine
+from pipeline.stages import refine
+from pipeline.results import SchemasResult, RefinementResult
 from schemas.intent import IntentModel
 from schemas.architecture import ArchitectureModel
-from schemas.api import APISchema
+from schemas.api import APISchema, APIField
 from schemas.db import DBSchema
 from schemas.auth import AuthSchema
 from schemas.ui import UISchema
-
-from pipeline.stages import (
-    extract_intent,
-    design_architecture,
-    generate_schemas,
-    refine,
-)
 
 
 RAW_TEXT = "Build a CRM where admins can manage contacts (name, email, phone) and viewers can read them."
 
 # ---------------------------------------------------------------------------
-# Use static fixtures from conftest.py to avoid all LLM calls in this file
+# Local fixtures: map crm_schemas tuple → named fixtures (zero LLM calls)
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
@@ -54,8 +41,16 @@ def arch_result(crm_schemas) -> ArchitectureModel:
 
 
 @pytest.fixture
-def schemas_result_tuple(crm_schemas) -> tuple[UISchema, APISchema, DBSchema, AuthSchema]:
+def schemas_tuple(crm_schemas) -> tuple[UISchema, APISchema, DBSchema, AuthSchema]:
+    """(ui, api, db, auth) — matches crm_schemas index order."""
     return crm_schemas[2], crm_schemas[3], crm_schemas[4], crm_schemas[5]
+
+
+@pytest.fixture
+def schemas_result(crm_schemas) -> SchemasResult:
+    """SchemasResult wrapping the static CRM schemas."""
+    ui, api, db, auth = crm_schemas[2], crm_schemas[3], crm_schemas[4], crm_schemas[5]
+    return SchemasResult(db=db, api=api, auth=auth, ui=ui)
 
 
 # ---------------------------------------------------------------------------
@@ -96,31 +91,28 @@ class TestDesignArchitecture:
 
 
 # ---------------------------------------------------------------------------
-# Stage 3 – generate_schemas
+# Stage 3 – generate_schemas (static)
 # ---------------------------------------------------------------------------
 
 class TestGenerateSchemas:
-    def test_returns_four_schemas(self, schemas_result_tuple):
-        assert len(schemas_result_tuple) == 4
-
-    def test_ui_is_correct_type(self, schemas_result_tuple):
-        ui, api, db, auth = schemas_result_tuple
+    def test_ui_is_correct_type(self, schemas_tuple):
+        ui, api, db, auth = schemas_tuple
         assert isinstance(ui, UISchema)
 
-    def test_api_is_correct_type(self, schemas_result_tuple):
-        ui, api, db, auth = schemas_result_tuple
+    def test_api_is_correct_type(self, schemas_tuple):
+        ui, api, db, auth = schemas_tuple
         assert isinstance(api, APISchema)
 
-    def test_db_is_correct_type(self, schemas_result_tuple):
-        ui, api, db, auth = schemas_result_tuple
+    def test_db_is_correct_type(self, schemas_tuple):
+        ui, api, db, auth = schemas_tuple
         assert isinstance(db, DBSchema)
 
-    def test_auth_is_correct_type(self, schemas_result_tuple):
-        ui, api, db, auth = schemas_result_tuple
+    def test_auth_is_correct_type(self, schemas_tuple):
+        ui, api, db, auth = schemas_tuple
         assert isinstance(auth, AuthSchema)
 
-    def test_schemas_have_content(self, schemas_result_tuple):
-        ui, api, db, auth = schemas_result_tuple
+    def test_schemas_have_content(self, schemas_tuple):
+        ui, api, db, auth = schemas_tuple
         assert len(ui.pages) >= 1
         assert len(api.endpoints) >= 1
         assert len(db.tables) >= 1
@@ -128,26 +120,93 @@ class TestGenerateSchemas:
 
 
 # ---------------------------------------------------------------------------
-# Stage 4 – refine (end-to-end)
+# Stage 4 – refine (static, zero LLM calls)
+# ---------------------------------------------------------------------------
+
+class TestRefineStatic:
+    def test_returns_refinement_result(self, schemas_result):
+        """refine() must return a RefinementResult, not raise."""
+        result = refine(schemas_result)
+        assert isinstance(result, RefinementResult)
+
+    def test_clean_schemas_have_is_clean_true(self, schemas_result):
+        """The static CRM example schemas are internally consistent."""
+        result = refine(schemas_result)
+        assert result.is_clean is True
+
+    def test_clean_schemas_have_empty_violations(self, schemas_result):
+        result = refine(schemas_result)
+        assert result.violations == []
+
+    def test_clean_schemas_summary_is_clean(self, schemas_result):
+        result = refine(schemas_result)
+        assert result.summary == "Clean"
+
+    def test_broken_schemas_return_is_clean_false(self, crm_schemas):
+        """Removing a DB column that an API field references must trigger a violation."""
+        ui, api, db, auth = crm_schemas[2], crm_schemas[3], crm_schemas[4], crm_schemas[5]
+
+        # Deep-copy the DB and strip 'email' from the contacts table
+        import copy as _copy
+        db_data = db.model_dump(by_alias=True)
+        db_data_copy = _copy.deepcopy(db_data)
+        for table in db_data_copy["tables"]:
+            table["columns"] = [c for c in table["columns"] if c["name"] != "email"]
+        broken_db = DBSchema(**db_data_copy)
+
+        broken = SchemasResult(db=broken_db, api=api, auth=auth, ui=ui)
+        result = refine(broken)
+        assert result.is_clean is False
+
+    def test_broken_schemas_have_at_least_one_violation(self, crm_schemas):
+        ui, api, db, auth = crm_schemas[2], crm_schemas[3], crm_schemas[4], crm_schemas[5]
+
+        import copy as _copy
+        db_data = _copy.deepcopy(db.model_dump(by_alias=True))
+        for table in db_data["tables"]:
+            table["columns"] = [c for c in table["columns"] if c["name"] != "email"]
+        broken_db = DBSchema(**db_data)
+
+        broken = SchemasResult(db=broken_db, api=api, auth=auth, ui=ui)
+        result = refine(broken)
+        assert len(result.violations) >= 1
+
+    def test_violation_has_required_fields(self, crm_schemas):
+        """Each violation must have layer, field, rule_violated, message."""
+        ui, api, db, auth = crm_schemas[2], crm_schemas[3], crm_schemas[4], crm_schemas[5]
+
+        import copy as _copy
+        db_data = _copy.deepcopy(db.model_dump(by_alias=True))
+        for table in db_data["tables"]:
+            table["columns"] = [c for c in table["columns"] if c["name"] != "email"]
+        broken_db = DBSchema(**db_data)
+
+        broken = SchemasResult(db=broken_db, api=api, auth=auth, ui=ui)
+        result = refine(broken)
+
+        for v in result.violations:
+            assert hasattr(v, "layer"), "violation missing .layer"
+            assert hasattr(v, "field"), "violation missing .field"
+            assert hasattr(v, "rule_violated"), "violation missing .rule_violated"
+            assert hasattr(v, "message"), "violation missing .message"
+            assert isinstance(v.layer, str) and v.layer
+            assert isinstance(v.field, str) and v.field
+            assert isinstance(v.rule_violated, str) and v.rule_violated
+            assert isinstance(v.message, str) and v.message
+
+
+# ---------------------------------------------------------------------------
+# Legacy TestRefine — kept for backward compatibility with CI history
 # ---------------------------------------------------------------------------
 
 class TestRefine:
-    def test_clean_schemas_pass_refine(self, schemas_result_tuple):
-        """The schemas must pass all consistency checks."""
-        ui, api, db, auth = schemas_result_tuple
-        # refine raises if any consistency errors are found
-        result_ui, result_api, result_db, result_auth = refine(ui, api, db, auth)
-        assert isinstance(result_ui, UISchema)
-        assert isinstance(result_api, APISchema)
-        assert isinstance(result_db, DBSchema)
-        assert isinstance(result_auth, AuthSchema)
+    def test_clean_schemas_pass_refine(self, schemas_result):
+        result = refine(schemas_result)
+        assert result.is_clean
 
-    def test_full_pipeline_end_to_end(self, intent_result, arch_result, schemas_result_tuple):
-        """Spot check the overall end-to-end chain."""
-        ui, api, db, auth = schemas_result_tuple
-        
-        # Intent has entities, Architecture has tables, DB has tables
+    def test_full_pipeline_end_to_end(self, intent_result, arch_result, schemas_result):
         assert intent_result.entities
         assert arch_result.entities
-        assert db.tables
-        refine(ui, api, db, auth)   # must not raise
+        assert schemas_result.db.tables
+        result = refine(schemas_result)
+        assert isinstance(result, RefinementResult)

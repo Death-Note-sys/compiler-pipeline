@@ -1,27 +1,21 @@
 """
 pipeline/run_pipeline.py
 ------------------------
-Manual test entry point for the full pipeline chain:
-  extract_intent → design_architecture → generate_schemas
+Manual entry point for the full 4-stage pipeline chain:
+  extract_intent → design_architecture → generate_schemas → refine
 
 Usage
 -----
-  # From the project root:
-  python -m pipeline.run_pipeline "Build a CRM where admins manage contacts"
+  python -m pipeline.run_pipeline "Build a simple todo app with auth"
 
-  # Or pipe from stdin:
-  echo "Build a todo app with tags and due dates" | python -m pipeline.run_pipeline
-
-Output
-------
-Prints labelled sections to stdout:
-
+Output sections (in order):
   === Intent ===
   === Architecture ===
   === DB Schema ===
   === API Schema ===
   === Auth Schema ===
   === UI Schema ===
+  === Refinement ===
 """
 
 from __future__ import annotations
@@ -38,7 +32,8 @@ logging.basicConfig(
 
 from pipeline.intent import extract_intent              # noqa: E402
 from pipeline.architecture import design_architecture   # noqa: E402
-from pipeline.schema_gen import generate_schemas         # noqa: E402
+from pipeline.schema_gen import generate_schemas        # noqa: E402
+from pipeline.refine import refine                      # noqa: E402
 
 
 def main() -> None:
@@ -77,7 +72,35 @@ def main() -> None:
     print("\n=== UI Schema ===")
     print(json.dumps(schemas.ui.model_dump(), indent=2))
 
+    # Stage 4
+    refinement = refine(schemas)
+
+    print("\n=== Refinement ===")
+    refinement_output = {
+        "is_clean": refinement.is_clean,
+        "summary": refinement.summary,
+        "violation_count": len(refinement.violations),
+        "violations": [
+            {
+                "layer": v.layer,
+                "field": v.field,
+                "rule_violated": v.rule_violated,
+                "message": v.message,
+            }
+            for v in refinement.violations
+        ],
+    }
+    print(json.dumps(refinement_output, indent=2))
+
+    if not refinement.is_clean:
+        print(
+            f"\n⚠  {len(refinement.violations)} violation(s) detected — "
+            "see above for details.",
+            file=sys.stderr,
+        )
+    else:
+        print("\n✓  All consistency checks passed.", file=sys.stderr)
+
 
 if __name__ == "__main__":
     main()
-
