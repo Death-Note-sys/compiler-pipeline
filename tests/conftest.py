@@ -15,6 +15,12 @@ import copy
 import json
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+# Load .env at import time so GROQ_API_KEY is visible during pytest collection
+# (when pytestmark skipif checks evaluate), not just at test runtime.
+load_dotenv()
+
 import pytest
 
 from schemas.intent import IntentModel

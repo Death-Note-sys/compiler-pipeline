@@ -1,7 +1,8 @@
 """
 pipeline/run_pipeline.py
 ------------------------
-Manual test entry point for the full extract_intent → design_architecture chain.
+Manual test entry point for the full pipeline chain:
+  extract_intent → design_architecture → generate_schemas
 
 Usage
 -----
@@ -13,13 +14,14 @@ Usage
 
 Output
 ------
-Prints two labelled sections to stdout:
+Prints labelled sections to stdout:
 
   === Intent ===
-  { ... IntentModel as formatted JSON ... }
-
   === Architecture ===
-  { ... ArchitectureModel as formatted JSON ... }
+  === DB Schema ===
+  === API Schema ===
+  === Auth Schema ===
+  === UI Schema ===
 """
 
 from __future__ import annotations
@@ -34,8 +36,9 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 
-from pipeline.intent import extract_intent          # noqa: E402
-from pipeline.architecture import design_architecture  # noqa: E402
+from pipeline.intent import extract_intent              # noqa: E402
+from pipeline.architecture import design_architecture   # noqa: E402
+from pipeline.schema_gen import generate_schemas         # noqa: E402
 
 
 def main() -> None:
@@ -59,6 +62,22 @@ def main() -> None:
     print("\n=== Architecture ===")
     print(json.dumps(arch.model_dump(), indent=2))
 
+    # Stage 3
+    schemas = generate_schemas(arch)
+
+    print("\n=== DB Schema ===")
+    print(json.dumps(schemas.db.model_dump(by_alias=True), indent=2))
+
+    print("\n=== API Schema ===")
+    print(json.dumps(schemas.api.model_dump(), indent=2))
+
+    print("\n=== Auth Schema ===")
+    print(json.dumps(schemas.auth.model_dump(), indent=2))
+
+    print("\n=== UI Schema ===")
+    print(json.dumps(schemas.ui.model_dump(), indent=2))
+
 
 if __name__ == "__main__":
     main()
+

@@ -3,10 +3,9 @@ pipeline/stages.py
 ------------------
 Pipeline stage gateway — the single import surface for all four stages.
 
-Stages 1 and 2 (extract_intent, design_architecture) delegate to their own
-modules (pipeline/intent.py, pipeline/architecture.py) which make real Groq
-calls.  Stages 3 and 4 (generate_schemas, refine) remain as hardcoded
-placeholders until their respective pipeline modules are implemented.
+Stages 1–3 (extract_intent, design_architecture, generate_schemas) delegate
+to their own modules which make real Groq calls.  Stage 4 (refine) remains
+as a hardcoded placeholder until its pipeline module is implemented.
 """
 
 from __future__ import annotations
@@ -58,119 +57,14 @@ def design_architecture(intent: IntentModel) -> ArchitectureModel:
 
 def generate_schemas(arch: ArchitectureModel) -> tuple[UISchema, APISchema, DBSchema, AuthSchema]:
     """
-    Placeholder: generate all four schemas from the ArchitectureModel.
+    Real implementation lives in pipeline/schema_gen.py (uses Groq API).
 
-    Returns a 4-tuple: (UISchema, APISchema, DBSchema, AuthSchema).
+    Returns a 4-tuple (ui, api, db, auth) for backward compatibility with
+    existing callers.  Internally uses SchemasResult with named attributes.
     """
-    # ── UI ──────────────────────────────────────────────────────────────────
-    ui = UISchema(
-        pages=[
-            UIPage(
-                name="ContactList",
-                page_type=PageType.list,
-                route="/contacts",
-                gate=Gate(kind=GateKind.role_gate, allowed_roles=["admin", "viewer"]),
-                components=[
-                    UIComponent(
-                        component_type=ComponentType.nav_bar,
-                        name="main_nav",
-                    ),
-                    UIComponent(
-                        component_type=ComponentType.table,
-                        name="contacts_table",
-                        fields=["id", "name", "email", "phone"],
-                    ),
-                ],
-            ),
-            UIPage(
-                name="ContactForm",
-                page_type=PageType.form,
-                route="/contacts/new",
-                gate=Gate(kind=GateKind.role_gate, allowed_roles=["admin"]),
-                components=[
-                    FormFieldComponent(name="name", field_type=FormFieldType.text, label="Full Name"),
-                    FormFieldComponent(name="email", field_type=FormFieldType.email, label="Email"),
-                    FormFieldComponent(name="phone", field_type=FormFieldType.text, label="Phone"),
-                ],
-            ),
-        ]
-    )
-
-    # ── API ─────────────────────────────────────────────────────────────────
-    api = APISchema(
-        endpoints=[
-            APIEndpoint(
-                path="/contacts",
-                method=HTTPMethod.GET,
-                pattern=APIPattern.crud_list,
-                response_fields=[
-                    APIField(name="id", field_type="uuid"),
-                    APIField(name="name", field_type="string"),
-                    APIField(name="email", field_type="string"),
-                    APIField(name="phone", field_type="string"),
-                ],
-                gate=Gate(kind=GateKind.role_gate, allowed_roles=["admin", "viewer"]),
-            ),
-            APIEndpoint(
-                path="/contacts",
-                method=HTTPMethod.POST,
-                pattern=APIPattern.crud_create,
-                request_fields=[
-                    APIField(name="name", field_type="string"),
-                    APIField(name="email", field_type="string"),
-                    APIField(name="phone", field_type="string"),
-                ],
-                response_fields=[
-                    APIField(name="id", field_type="uuid"),
-                    APIField(name="name", field_type="string"),
-                    APIField(name="email", field_type="string"),
-                    APIField(name="phone", field_type="string"),
-                    APIField(name="created_at", field_type="datetime"),
-                ],
-                gate=Gate(kind=GateKind.role_gate, allowed_roles=["admin"]),
-            ),
-        ]
-    )
-
-    # ── DB ──────────────────────────────────────────────────────────────────
-    db = DBSchema(
-        tables=[
-            DBTable(
-                name="contacts",
-                columns=[
-                    DBColumn(name="id", type=ColumnType.uuid, nullable=False),
-                    DBColumn(name="name", type=ColumnType.string, nullable=False),
-                    DBColumn(name="email", type=ColumnType.string, nullable=False),
-                    DBColumn(name="phone", type=ColumnType.string, nullable=True),
-                    DBColumn(name="created_at", type=ColumnType.datetime, nullable=False),
-                ],
-            )
-        ]
-    )
-
-    # ── Auth ─────────────────────────────────────────────────────────────────
-    auth = AuthSchema(
-        roles=[
-            Role(
-                name="admin",
-                permissions=[
-                    Permission(resource="Contact", action=PermissionAction.manage),
-                ],
-            ),
-            Role(
-                name="viewer",
-                permissions=[
-                    Permission(resource="Contact", action=PermissionAction.read),
-                ],
-            ),
-        ],
-        permission_matrix=[
-            PermissionMatrixEntry(role="admin", resource="Contact", action=PermissionAction.manage),
-            PermissionMatrixEntry(role="viewer", resource="Contact", action=PermissionAction.read),
-        ],
-    )
-
-    return ui, api, db, auth
+    from pipeline.schema_gen import generate_schemas as _real_generate_schemas
+    result = _real_generate_schemas(arch)
+    return result.ui, result.api, result.db, result.auth
 
 
 # ---------------------------------------------------------------------------
