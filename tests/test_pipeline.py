@@ -37,34 +37,25 @@ from pipeline.stages import (
 )
 
 
-GROQ_API_KEY_PRESENT = bool(os.environ.get("GROQ_API_KEY"))
-pytestmark = pytest.mark.skipif(
-    not GROQ_API_KEY_PRESENT,
-    reason="GROQ_API_KEY not set — skipping live Groq integration tests",
-)
-
-RAW_TEXT = (
-    "Build a CRM where admins can manage contacts (name, email, phone, company) "
-    "and sales reps can view and update their assigned contacts. Include activity logging."
-)
+RAW_TEXT = "Build a CRM where admins can manage contacts (name, email, phone) and viewers can read them."
 
 # ---------------------------------------------------------------------------
-# Module-scoped fixtures to avoid redundant Groq API calls
+# Use static fixtures from conftest.py to avoid all LLM calls in this file
 # ---------------------------------------------------------------------------
 
-@pytest.fixture(scope="module")
-def intent_result() -> IntentModel:
-    return extract_intent(RAW_TEXT)
+@pytest.fixture
+def intent_result(crm_schemas) -> IntentModel:
+    return crm_schemas[0]
 
 
-@pytest.fixture(scope="module")
-def arch_result(intent_result) -> ArchitectureModel:
-    return design_architecture(intent_result)
+@pytest.fixture
+def arch_result(crm_schemas) -> ArchitectureModel:
+    return crm_schemas[1]
 
 
-@pytest.fixture(scope="module")
-def schemas_result_tuple(arch_result) -> tuple[UISchema, APISchema, DBSchema, AuthSchema]:
-    return generate_schemas(arch_result)
+@pytest.fixture
+def schemas_result_tuple(crm_schemas) -> tuple[UISchema, APISchema, DBSchema, AuthSchema]:
+    return crm_schemas[2], crm_schemas[3], crm_schemas[4], crm_schemas[5]
 
 
 # ---------------------------------------------------------------------------
