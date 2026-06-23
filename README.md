@@ -5,7 +5,7 @@
 > Auth rules, and Business logic — through a deterministic
 > multi-stage pipeline.
 
-**Live Demo:** [your-render-url]
+**Live Demo:** https://compiler-pipeline.onrender.com/
 **GitHub:** https://github.com/Death-Note-sys/compiler-pipeline
 
 ---
