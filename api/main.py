@@ -201,18 +201,21 @@ document.getElementById('generateBtn').addEventListener('click', async () => {
   results.style.display = 'none';
 
   try {
-    const res = await fetch('/generate', {
+    const response = await fetch('/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt })
     });
     
-    const data = await res.json();
-    
-    if (!res.ok) {
-      errorBox.style.display = 'block';
-      errorBox.textContent = `Error ${res.status}: ${data.error || 'Unknown Error'} - ${data.detail || JSON.stringify(data)}`;
+    if (!response.ok) {
+        const text = await response.text();
+        if (text.includes('DOCTYPE')) {
+            throw new Error('Server is waking up — please wait 30 seconds and try again.');
+        }
+        const err = JSON.parse(text);
+        throw new Error(err.detail || 'Pipeline failed');
     } else {
+      const data = await response.json();
       results.style.display = 'block';
       document.getElementById('out-intent').textContent = JSON.stringify(data.intent, null, 2);
       document.getElementById('out-arch').textContent = JSON.stringify(data.architecture, null, 2);
