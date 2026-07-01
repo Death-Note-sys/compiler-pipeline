@@ -271,7 +271,11 @@ document.getElementById('generateBtn').addEventListener('click', async () => {
             ddlBadge.textContent = '✗ Invalid';
             ddlBadge.className = 'badge error';
           }
-          document.getElementById('out-ddl').textContent = data.sql + (data.error ? '\n\nError: ' + data.error : '');
+          let outText = data.sql;
+          if (data.error) {
+            outText += String.fromCharCode(10, 10) + 'Error: ' + data.error;
+          }
+          document.getElementById('out-ddl').textContent = outText;
           document.getElementById('det-ddl').setAttribute('open', '');
         } else if (stage === 'api_schema') {
           loading.textContent = '⟳ Running: Auth Schema...';
