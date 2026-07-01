@@ -160,6 +160,37 @@ HTML_CONTENT = """<!DOCTYPE html>
   }
   .badge.success { background-color: rgba(34, 197, 94, 0.2); color: var(--success); border: 1px solid var(--success); }
   .badge.error { background-color: rgba(239, 68, 68, 0.2); color: var(--error); border: 1px solid var(--error); }
+  .examples-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    margin-top: -10px;
+    margin-bottom: 10px;
+  }
+  .examples-label {
+    font-size: 12px;
+    color: #999;
+  }
+  .chip {
+    padding: 6px 12px;
+    border-radius: 16px;
+    font-size: 12px;
+    cursor: pointer;
+    border: 1px solid #2a2a2a;
+    background-color: #1a1a1a;
+    color: #999;
+    transition: filter 0.2s;
+    user-select: none;
+  }
+  .chip:hover {
+    filter: brightness(1.2);
+  }
+  .chip.edge-case {
+    border: 1px solid #92400e;
+    background-color: #1c1200;
+    color: #d97706;
+  }
 </style>
 </head>
 <body>
@@ -168,6 +199,14 @@ HTML_CONTENT = """<!DOCTYPE html>
   <h1>NL-to-App Compiler</h1>
   <div>
     <textarea id="prompt">Build a CRM where admins manage contacts and sales reps view their assigned contacts. Include role-based access and activity logging.</textarea>
+  </div>
+  <div class="examples-row">
+    <span class="examples-label">Try an example:</span>
+    <div class="chip" data-prompt="Build a CRM where admins manage contacts and sales reps view their assigned contacts. Include role-based access and activity logging.">CRM</div>
+    <div class="chip" data-prompt="An e-commerce platform where customers browse products, add to cart, and checkout. Admins manage inventory and view orders. Support discount codes.">E-commerce</div>
+    <div class="chip" data-prompt="Build a gym management system where trainers manage workout plans, members book classes, administrators manage memberships, and nutritionists upload diet plans.">Gym</div>
+    <div class="chip edge-case" data-prompt="Build me an app.">Vague (edge case)</div>
+    <div class="chip edge-case" data-prompt="All users are both admins and regular users with full access but also restricted access at the same time.">Conflicting (edge case)</div>
   </div>
   <div>
     <button id="generateBtn">Generate</button>
@@ -195,6 +234,12 @@ HTML_CONTENT = """<!DOCTYPE html>
 </div>
 
 <script>
+document.querySelectorAll('.chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    document.getElementById('prompt').value = chip.dataset.prompt;
+  });
+});
+
 document.getElementById('generateBtn').addEventListener('click', async () => {
   const btn = document.getElementById('generateBtn');
   const loading = document.getElementById('loading');
