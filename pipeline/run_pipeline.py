@@ -52,6 +52,11 @@ def main() -> None:
     # Stage 2
     arch = design_architecture(intent)
     print("\n=== Architecture ===")
+    if arch.assumptions:
+        print("Assumptions made:")
+        for a in arch.assumptions:
+            print(f"  💡 {a}")
+        print()
     print(json.dumps(arch.model_dump(), indent=2))
 
     # Stage 3

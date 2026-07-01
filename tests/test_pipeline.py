@@ -89,6 +89,13 @@ class TestDesignArchitecture:
     def test_has_flows(self, arch_result):
         assert len(arch_result.flows) >= 1
 
+    def test_has_assumptions_attribute(self, arch_result):
+        assert hasattr(arch_result, "assumptions")
+        assert isinstance(arch_result.assumptions, list)
+
+    def test_model_fields_contains_assumptions(self):
+        assert "assumptions" in ArchitectureModel.model_fields
+
 
 # ---------------------------------------------------------------------------
 # Stage 3 – generate_schemas (static)

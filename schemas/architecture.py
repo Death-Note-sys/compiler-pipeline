@@ -81,3 +81,4 @@ class ArchitectureModel(BaseModel):
     relations: List[EntityRelation] = Field(default_factory=list)
     roles: List[ArchRole] = Field(default_factory=list)
     flows: List[UserFlow] = Field(default_factory=list)
+    assumptions: List[str] = Field(default_factory=list)

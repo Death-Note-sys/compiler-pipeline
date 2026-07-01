@@ -74,6 +74,9 @@ The JSON object must have exactly these top-level keys:
       "actor": "<role name that initiates this flow>",
       "steps": ["<ordered, human-readable description of each step>"]
     }
+  ],
+  "assumptions": [
+    "<If ambiguous/incomplete, document each assumption here. If fully specified, leave empty.>"
   ]
 }
 
@@ -84,6 +87,12 @@ Rules:
 - Model every meaningful relationship between entities as an EntityRelation.
 - Define one UserFlow per major action each role can perform.
 - relation_type MUST be one of the three allowed values: one_to_one, one_to_many, many_to_many.
+- If the user's prompt is ambiguous, incomplete, or leaves design decisions open, document each assumption you made in the 'assumptions' field as a clear, plain-English sentence.
+  Examples:
+  - 'Assumed authentication is required since no public access was specified.'
+  - 'Assumed workout plans are created by trainers, not uploaded by nutritionists, since both were mentioned ambiguously.'
+  - 'Assumed online class booking since no in-person constraint was specified.'
+  If the prompt is fully specified with no ambiguities, leave assumptions as an empty list.
 - Return ONLY the JSON object. Do not wrap it in markdown or add any explanation.
 """
 

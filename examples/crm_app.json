@@ -41,7 +41,8 @@
           "View contact list"
         ]
       }
-    ]
+    ],
+    "assumptions": []
   },
   "ui": {
     "pages": [

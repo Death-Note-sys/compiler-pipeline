@@ -177,7 +177,11 @@ HTML_CONTENT = """<!DOCTYPE html>
   <div id="errorBox" class="error-box"></div>
   <div id="results" style="display: none;">
     <details id="det-intent"><summary>Intent</summary><pre id="out-intent"></pre></details>
-    <details id="det-arch"><summary>Architecture</summary><pre id="out-arch"></pre></details>
+    <details id="det-arch">
+      <summary>Architecture</summary>
+      <div id="arch-assumptions" style="display: none; padding: 12px 16px; background-color: rgba(255,255,255,0.05); border-bottom: 1px solid var(--border); font-size: 14px; line-height: 1.5; color: #a3a3a3;"></div>
+      <pre id="out-arch"></pre>
+    </details>
     <details id="det-db"><summary>DB Schema</summary><pre id="out-db"></pre></details>
     <details id="det-ddl"><summary>SQL DDL <span id="ddl-badge" class="badge"></span></summary><pre id="out-ddl"></pre></details>
     <details id="det-api"><summary>API Schema</summary><pre id="out-api"></pre></details>
@@ -256,6 +260,26 @@ document.getElementById('generateBtn').addEventListener('click', async () => {
         } else if (stage === 'architecture') {
           loading.textContent = '⟳ Running: DB Schema...';
           document.getElementById('out-arch').textContent = JSON.stringify(data, null, 2);
+          const assumptionsBox = document.getElementById('arch-assumptions');
+          if (data.assumptions && data.assumptions.length > 0) {
+            assumptionsBox.style.display = 'block';
+            
+            // safely build elements instead of innerHTML to avoid XSS
+            assumptionsBox.textContent = '';
+            const strong = document.createElement('strong');
+            strong.textContent = 'Assumptions made:';
+            strong.style.color = 'var(--text)';
+            assumptionsBox.appendChild(strong);
+            
+            data.assumptions.forEach(a => {
+              const div = document.createElement('div');
+              div.textContent = '💡 ' + a;
+              div.style.marginTop = '4px';
+              assumptionsBox.appendChild(div);
+            });
+          } else {
+            assumptionsBox.style.display = 'none';
+          }
           document.getElementById('det-arch').setAttribute('open', '');
         } else if (stage === 'db_schema') {
           loading.textContent = '⟳ Running: SQL DDL...';

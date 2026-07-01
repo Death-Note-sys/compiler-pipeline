@@ -51,7 +51,8 @@
           "Click delete button → DELETE /tasks/{id}"
         ]
       }
-    ]
+    ],
+    "assumptions": []
   },
   "ui": {
     "pages": [
