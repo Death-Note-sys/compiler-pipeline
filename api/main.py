@@ -11,11 +11,13 @@ POST /generate  — runs the full 4-stage pipeline and returns structured JSON
 
 from __future__ import annotations
 
+import asyncio
+import json as _json
 import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.responses import JSONResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
 from pipeline.errors import PipelineStageError
@@ -197,50 +199,106 @@ document.getElementById('generateBtn').addEventListener('click', async () => {
 
   btn.disabled = true;
   loading.style.display = 'block';
+  loading.textContent = '⟳ Starting pipeline...';
   errorBox.style.display = 'none';
-  results.style.display = 'none';
+  results.style.display = 'block';
+
+  // Reset all sections to collapsed and clear content
+  ['intent','arch','db','api','auth','ui','refine'].forEach(id => {
+    const det = document.getElementById('det-' + id);
+    if (det) det.removeAttribute('open');
+  });
 
   try {
-    const response = await fetch('/generate', {
+    const response = await fetch('/generate/stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ prompt })
     });
-    
+
     if (!response.ok) {
-        const text = await response.text();
-        if (text.includes('DOCTYPE')) {
-            throw new Error('Server is waking up — please wait 30 seconds and try again.');
-        }
-        const err = JSON.parse(text);
-        throw new Error(err.detail || 'Pipeline failed');
-    } else {
-      const data = await response.json();
-      results.style.display = 'block';
-      document.getElementById('out-intent').textContent = JSON.stringify(data.intent, null, 2);
-      document.getElementById('out-arch').textContent = JSON.stringify(data.architecture, null, 2);
-      document.getElementById('out-db').textContent = JSON.stringify(data.schemas.db, null, 2);
-      document.getElementById('out-api').textContent = JSON.stringify(data.schemas.api, null, 2);
-      document.getElementById('out-auth').textContent = JSON.stringify(data.schemas.auth, null, 2);
-      document.getElementById('out-ui').textContent = JSON.stringify(data.schemas.ui, null, 2);
-      
-      const ref = data.refinement;
-      const refBadge = document.getElementById('refine-badge');
-      if (ref.is_clean) {
-        refBadge.textContent = '✓ Clean';
-        refBadge.className = 'badge success';
-      } else {
-        refBadge.textContent = ref.violation_count + ' Violations';
-        refBadge.className = 'badge error';
+      const text = await response.text();
+      if (text.includes('DOCTYPE')) {
+        throw new Error('Server is waking up \u2014 please wait 30 seconds and try again.');
       }
-      document.getElementById('out-refine').textContent = JSON.stringify(ref, null, 2);
+      const errData = JSON.parse(text);
+      throw new Error(errData.detail || 'Pipeline failed');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      // Split on SSE double-newline boundaries
+      const SSE_SEP = String.fromCharCode(10, 10);
+      const parts = buffer.split(SSE_SEP);
+      buffer = parts.pop(); // keep incomplete trailing chunk
+
+      for (const part of parts) {
+        const line = part.trim();
+        if (!line.startsWith('data: ')) continue;
+        let event;
+        try { event = JSON.parse(line.slice(6)); } catch { continue; }
+
+        const stage = event.stage;
+        const data = event.data;
+
+        if (stage === 'intent') {
+          loading.textContent = '⟳ Running: Architecture...';
+          document.getElementById('out-intent').textContent = JSON.stringify(data, null, 2);
+          document.getElementById('det-intent').setAttribute('open', '');
+        } else if (stage === 'architecture') {
+          loading.textContent = '⟳ Running: DB Schema...';
+          document.getElementById('out-arch').textContent = JSON.stringify(data, null, 2);
+          document.getElementById('det-arch').setAttribute('open', '');
+        } else if (stage === 'db_schema') {
+          loading.textContent = '⟳ Running: API Schema...';
+          document.getElementById('out-db').textContent = JSON.stringify(data, null, 2);
+          document.getElementById('det-db').setAttribute('open', '');
+        } else if (stage === 'api_schema') {
+          loading.textContent = '⟳ Running: Auth Schema...';
+          document.getElementById('out-api').textContent = JSON.stringify(data, null, 2);
+          document.getElementById('det-api').setAttribute('open', '');
+        } else if (stage === 'auth_schema') {
+          loading.textContent = '⟳ Running: UI Schema...';
+          document.getElementById('out-auth').textContent = JSON.stringify(data, null, 2);
+          document.getElementById('det-auth').setAttribute('open', '');
+        } else if (stage === 'ui_schema') {
+          loading.textContent = '⟳ Running: Refinement...';
+          document.getElementById('out-ui').textContent = JSON.stringify(data, null, 2);
+          document.getElementById('det-ui').setAttribute('open', '');
+        } else if (stage === 'refinement') {
+          const ref = data;
+          const refBadge = document.getElementById('refine-badge');
+          if (ref.is_clean) {
+            refBadge.textContent = '\u2713 Clean';
+            refBadge.className = 'badge success';
+          } else {
+            refBadge.textContent = ref.violation_count + ' Violations';
+            refBadge.className = 'badge error';
+          }
+          document.getElementById('out-refine').textContent = JSON.stringify(ref, null, 2);
+          document.getElementById('det-refine').setAttribute('open', '');
+        } else if (stage === 'done') {
+          loading.style.display = 'none';
+        } else if (stage === 'error') {
+          errorBox.style.display = 'block';
+          errorBox.textContent = 'Pipeline error at ' + (event.failed_stage || 'unknown') + ': ' + (event.detail || 'Unknown error');
+          loading.style.display = 'none';
+        }
+      }
     }
   } catch (err) {
     errorBox.style.display = 'block';
     errorBox.textContent = 'Network or server error: ' + err.message;
+    loading.style.display = 'none';
   } finally {
     btn.disabled = false;
-    loading.style.display = 'none';
   }
 });
 </script>
@@ -335,3 +393,107 @@ def generate(req: PromptRequest):
             ],
         },
     }
+
+
+@app.post("/generate/stream")
+async def generate_stream(req: PromptRequest):
+    """
+    Stream the 4-stage pipeline results as Server-Sent Events.
+
+    Each pipeline stage result is emitted immediately after it completes.
+    Schema generation emits 4 separate events (one per sub-schema) with
+    real latency gaps between them.
+
+    Event format: ``data: {"stage": "<name>", "data": <payload>}\\n\\n``
+    Terminal event: ``data: {"stage": "done"}\\n\\n``
+    Error event:   ``data: {"stage": "error", "failed_stage": "...", "detail": "..."}\\n\\n``
+    """
+    from pipeline.intent import extract_intent
+    from pipeline.architecture import design_architecture
+    from pipeline.schema_gen import generate_schemas_streaming
+    from pipeline.refine import refine
+    from pipeline.results import SchemasResult
+
+    def _sse(payload: dict) -> str:
+        return f"data: {_json.dumps(payload)}\n\n"
+
+    async def event_generator():
+        loop = asyncio.get_event_loop()
+        db = api = auth = ui = None
+
+        try:
+            # Stage 1: Intent (blocking — run in thread)
+            intent = await loop.run_in_executor(None, extract_intent, req.prompt)
+            yield _sse({"stage": "intent", "data": intent.model_dump()})
+            logger.info("SSE | emitted intent")
+
+            # Stage 2: Architecture (blocking — run in thread)
+            arch = await loop.run_in_executor(None, design_architecture, intent)
+            yield _sse({"stage": "architecture", "data": arch.model_dump()})
+            logger.info("SSE | emitted architecture")
+
+            # Stage 3: Schema generation — streaming variant (4 real events)
+            def _run_schema_gen():
+                """Run the streaming generator to completion, collecting yields."""
+                return list(generate_schemas_streaming(arch))
+
+            # We can't directly iterate a sync generator across await boundaries,
+            # so we collect all (stage_name, schema) pairs in a thread and then
+            # yield them sequentially. Each LLM call blocks inside the thread,
+            # giving real time gaps in the stream.
+            schema_items = await loop.run_in_executor(None, _run_schema_gen)
+
+            for stage_name, schema_obj in schema_items:
+                if stage_name == "db_schema":
+                    db = schema_obj
+                    yield _sse({"stage": "db_schema", "data": schema_obj.model_dump(by_alias=True)})
+                elif stage_name == "api_schema":
+                    api = schema_obj
+                    yield _sse({"stage": "api_schema", "data": schema_obj.model_dump()})
+                elif stage_name == "auth_schema":
+                    auth = schema_obj
+                    yield _sse({"stage": "auth_schema", "data": schema_obj.model_dump()})
+                elif stage_name == "ui_schema":
+                    ui = schema_obj
+                    yield _sse({"stage": "ui_schema", "data": schema_obj.model_dump()})
+                logger.info("SSE | emitted %s", stage_name)
+
+            # Stage 4: Refine (pure Python, near-instant)
+            schemas = SchemasResult(db=db, api=api, auth=auth, ui=ui)
+            refinement = await loop.run_in_executor(None, refine, schemas)
+            ref_payload = {
+                "is_clean": refinement.is_clean,
+                "violation_count": len(refinement.violations),
+                "violations": [
+                    {
+                        "layer": v.layer,
+                        "field": v.field,
+                        "rule_violated": v.rule_violated,
+                        "message": v.message,
+                    }
+                    for v in refinement.violations
+                ],
+                "summary": refinement.summary,
+            }
+            yield _sse({"stage": "refinement", "data": ref_payload})
+            logger.info("SSE | emitted refinement")
+
+            yield _sse({"stage": "done"})
+            logger.info("SSE | stream complete")
+
+        except PipelineStageError as exc:
+            logger.error("SSE | pipeline error at %s: %s", exc.stage, exc.detail)
+            yield _sse({"stage": "error", "failed_stage": exc.stage, "detail": exc.detail})
+
+        except Exception as exc:
+            logger.error("SSE | unexpected error: %s", exc)
+            yield _sse({"stage": "error", "failed_stage": "unknown", "detail": str(exc)})
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # Disable Nginx buffering for SSE
+        },
+    )

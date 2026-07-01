@@ -34,7 +34,7 @@ from schemas.db import DBSchema
 from schemas.ui import UISchema
 
 # Re-export so existing "from pipeline.schema_gen import SchemasResult" callers keep working
-__all__ = ["generate_schemas", "SchemasResult"]
+__all__ = ["generate_schemas", "generate_schemas_streaming", "SchemasResult"]
 
 logger = logging.getLogger(__name__)
 
@@ -540,3 +540,65 @@ def generate_schemas(arch: ArchitectureModel) -> SchemasResult:
     )
 
     return SchemasResult(db=db, api=api, auth=auth, ui=ui)
+
+
+from typing import Generator, Tuple
+
+def generate_schemas_streaming(
+    arch: ArchitectureModel,
+) -> Generator[Tuple[str, Any], None, None]:
+    """
+    Streaming variant of generate_schemas().
+
+    Yields ``(stage_name, schema_object)`` after each sequential LLM call
+    completes, so callers can emit SSE events with real latency between them.
+
+    Yield order:
+        ("db_schema",   DBSchema)
+        ("api_schema",  APISchema)
+        ("auth_schema", AuthSchema)
+        ("ui_schema",   UISchema)
+
+    Raises
+    ------
+    PipelineStageError
+        Propagated unchanged from ``_call_and_validate`` if both the
+        first attempt and repair fail for any sub-schema.
+    """
+    logger.info(
+        "generate_schemas_streaming | starting | entities=%d roles=%d",
+        len(arch.entities),
+        len(arch.roles),
+    )
+
+    # 1. DB
+    db_messages = _build_db_messages(arch)
+    db: DBSchema = _call_and_validate("generate_schemas.db", db_messages, DBSchema)
+    yield ("db_schema", db)
+
+    # 2. API (sees DB)
+    api_messages = _build_api_messages(arch, db)
+    api: APISchema = _call_and_validate(
+        "generate_schemas.api", api_messages, APISchema,
+        pre_normalize=_normalize_api_data,
+    )
+    yield ("api_schema", api)
+
+    # 3. Auth (sees DB + API)
+    auth_messages = _build_auth_messages(arch, db, api)
+    auth: AuthSchema = _call_and_validate("generate_schemas.auth", auth_messages, AuthSchema)
+    yield ("auth_schema", auth)
+
+    # 4. UI (sees all three)
+    ui_messages = _build_ui_messages(arch, db, api, auth)
+    ui: UISchema = _call_and_validate("generate_schemas.ui", ui_messages, UISchema)
+    yield ("ui_schema", ui)
+
+    logger.info(
+        "generate_schemas_streaming | complete | tables=%d endpoints=%d roles=%d pages=%d",
+        len(db.tables),
+        len(api.endpoints),
+        len(auth.roles),
+        len(ui.pages),
+    )
+
