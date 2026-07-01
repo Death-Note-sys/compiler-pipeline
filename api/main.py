@@ -419,7 +419,6 @@ async def generate_stream(req: PromptRequest):
 
     async def event_generator():
         loop = asyncio.get_event_loop()
-        db = api = auth = ui = None
 
         try:
             # Stage 1: Intent (blocking — run in thread)
@@ -432,18 +431,11 @@ async def generate_stream(req: PromptRequest):
             yield _sse({"stage": "architecture", "data": arch.model_dump()})
             logger.info("SSE | emitted architecture")
 
-            # Stage 3: Schema generation — streaming variant (4 real events)
-            def _run_schema_gen():
-                """Run the streaming generator to completion, collecting yields."""
-                return list(generate_schemas_streaming(arch))
-
-            # We can't directly iterate a sync generator across await boundaries,
-            # so we collect all (stage_name, schema) pairs in a thread and then
-            # yield them sequentially. Each LLM call blocks inside the thread,
-            # giving real time gaps in the stream.
-            schema_items = await loop.run_in_executor(None, _run_schema_gen)
-
-            for stage_name, schema_obj in schema_items:
+            # Stage 3: Schema generation — parallel async streaming variant
+            # generate_schemas_streaming is now an async generator; iterate it directly.
+            # It runs DB solo (Round 1), then API+Auth in parallel (Round 2), then UI (Round 3).
+            db = api = auth = ui = None
+            async for stage_name, schema_obj in generate_schemas_streaming(arch):
                 if stage_name == "db_schema":
                     db = schema_obj
                     yield _sse({"stage": "db_schema", "data": schema_obj.model_dump(by_alias=True)})

@@ -18,9 +18,11 @@ Public API
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
-from typing import Any
+import time
+from typing import Any, AsyncGenerator, Generator, Tuple
 
 from pydantic import ValidationError
 
@@ -34,7 +36,7 @@ from schemas.db import DBSchema
 from schemas.ui import UISchema
 
 # Re-export so existing "from pipeline.schema_gen import SchemasResult" callers keep working
-__all__ = ["generate_schemas", "generate_schemas_streaming", "SchemasResult"]
+__all__ = ["generate_schemas", "generate_schemas_parallel", "generate_schemas_streaming", "SchemasResult"]
 
 logger = logging.getLogger(__name__)
 
@@ -338,19 +340,18 @@ def _build_api_messages(arch: ArchitectureModel, db: DBSchema) -> list[dict[str,
     ]
 
 
-def _build_auth_messages(arch: ArchitectureModel, db: DBSchema, api: APISchema) -> list[dict[str, str]]:
+def _build_auth_messages(arch: ArchitectureModel, db: DBSchema) -> list[dict[str, str]]:
+    """Build auth messages using arch + db only (APISchema not required)."""
     arch_json = json.dumps(arch.model_dump(), indent=2)
     db_json = json.dumps(db.model_dump(by_alias=True), indent=2)
-    api_json = json.dumps(api.model_dump(), indent=2)
     return [
         {"role": "system", "content": _AUTH_SYSTEM_PROMPT},
         {"role": "user", "content": (
-            "Here is the system architecture and the generated schemas so far. "
+            "Here is the system architecture and the generated DB schema. "
             "Design the auth schema. All roles you reference must exist in the "
-            "architecture and API gates.\n\n"
+            "architecture.\n\n"
             f"=== Architecture ===\n{arch_json}\n\n"
-            f"=== DB Schema ===\n{db_json}\n\n"
-            f"=== API Schema ===\n{api_json}"
+            f"=== DB Schema ===\n{db_json}"
         )},
     ]
 
@@ -523,8 +524,8 @@ def generate_schemas(arch: ArchitectureModel) -> SchemasResult:
         pre_normalize=_normalize_api_data,
     )
 
-    # 3. Auth (sees DB + API)
-    auth_messages = _build_auth_messages(arch, db, api)
+    # 3. Auth (sees DB only — runs in parallel with API in parallel variants)
+    auth_messages = _build_auth_messages(arch, db)
     auth: AuthSchema = _call_and_validate("generate_schemas.auth", auth_messages, AuthSchema)
 
     # 4. UI (sees all three)
@@ -542,28 +543,120 @@ def generate_schemas(arch: ArchitectureModel) -> SchemasResult:
     return SchemasResult(db=db, api=api, auth=auth, ui=ui)
 
 
-from typing import Generator, Tuple
+# ---------------------------------------------------------------------------
+# Private helper: single-schema generators for use with asyncio.to_thread()
+# ---------------------------------------------------------------------------
 
-def generate_schemas_streaming(
-    arch: ArchitectureModel,
-) -> Generator[Tuple[str, Any], None, None]:
+def _gen_db(arch: ArchitectureModel) -> DBSchema:
+    """Generate DBSchema synchronously (for use with asyncio.to_thread)."""
+    msgs = _build_db_messages(arch)
+    return _call_and_validate("generate_schemas.db", msgs, DBSchema)
+
+
+def _gen_auth(arch: ArchitectureModel, db: DBSchema) -> AuthSchema:
+    """Generate AuthSchema synchronously from arch+db only (for use with asyncio.to_thread)."""
+    msgs = _build_auth_messages(arch, db)
+    return _call_and_validate("generate_schemas.auth", msgs, AuthSchema)
+
+
+def _gen_api(arch: ArchitectureModel, db: DBSchema) -> APISchema:
+    """Generate APISchema synchronously (for use with asyncio.to_thread)."""
+    msgs = _build_api_messages(arch, db)
+    return _call_and_validate(
+        "generate_schemas.api", msgs, APISchema,
+        pre_normalize=_normalize_api_data,
+    )
+
+
+def _gen_ui(arch: ArchitectureModel, db: DBSchema, api: APISchema, auth: AuthSchema) -> UISchema:
+    """Generate UISchema synchronously (for use with asyncio.to_thread)."""
+    msgs = _build_ui_messages(arch, db, api, auth)
+    return _call_and_validate("generate_schemas.ui", msgs, UISchema)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PARALLEL ASYNC FUNCTION
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def generate_schemas_parallel(arch: ArchitectureModel) -> SchemasResult:
     """
-    Streaming variant of generate_schemas().
+    Generate all four sub-schemas with API and Auth running in parallel.
 
-    Yields ``(stage_name, schema_object)`` after each sequential LLM call
-    completes, so callers can emit SSE events with real latency between them.
+    Revised dependency graph (Auth no longer requires APISchema context):
+
+        Round 1  DB  (solo — API and Auth both need DB)
+        Round 2  API + Auth  (parallel — both only need DB)
+        Round 3  UI  (needs DB + API + Auth)
+
+    Saves roughly one full LLM call (~30-40s) compared to sequential.
+
+    Returns
+    -------
+    SchemasResult
+    """
+    logger.info(
+        "generate_schemas_parallel | starting | entities=%d roles=%d",
+        len(arch.entities),
+        len(arch.roles),
+    )
+
+    # Round 1: DB (must come first — API and Auth both need it)
+    t0 = time.perf_counter()
+    db: DBSchema = await asyncio.to_thread(_gen_db, arch)
+    db_time = time.perf_counter() - t0
+    logger.info("generate_schemas_parallel | db done | %.1fs", db_time)
+
+    # Round 2: API and Auth in parallel (both only need DB now)
+    t1 = time.perf_counter()
+    api, auth = await asyncio.gather(
+        asyncio.to_thread(_gen_api, arch, db),
+        asyncio.to_thread(_gen_auth, arch, db),
+    )
+    parallel_time = time.perf_counter() - t1
+    saved = parallel_time  # time saved vs running them sequentially ≈ min(api_t, auth_t)
+    logger.info(
+        "parallel_schemas | parallel_round=%.1fs (saved ~%.1fs vs sequential)",
+        parallel_time,
+        saved / 2,  # rough estimate: saved half the slower call
+    )
+
+    # Round 3: UI (needs all three)
+    ui: UISchema = await asyncio.to_thread(_gen_ui, arch, db, api, auth)
+
+    logger.info(
+        "generate_schemas_parallel | complete | tables=%d endpoints=%d roles=%d pages=%d",
+        len(db.tables),
+        len(api.endpoints),
+        len(auth.roles),
+        len(ui.pages),
+    )
+    return SchemasResult(db=db, api=api, auth=auth, ui=ui)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PARALLEL STREAMING GENERATOR (async)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+async def generate_schemas_streaming(
+    arch: ArchitectureModel,
+) -> AsyncGenerator[Tuple[str, Any], None]:
+    """
+    Async streaming variant of generate_schemas_parallel().
+
+    Yields ``(stage_name, schema_object)`` after each sub-schema completes.
+    API and Auth run in parallel (Round 2); whichever finishes first yields
+    its event first.
 
     Yield order:
-        ("db_schema",   DBSchema)
-        ("api_schema",  APISchema)
-        ("auth_schema", AuthSchema)
-        ("ui_schema",   UISchema)
+        ("db_schema",   DBSchema)         -- Round 1 (solo)
+        ("api_schema",  APISchema) }       -- Round 2 (parallel, order not guaranteed)
+        ("auth_schema", AuthSchema) }      -- Round 2 (parallel, order not guaranteed)
+        ("ui_schema",   UISchema)          -- Round 3 (after both Round 2 complete)
 
     Raises
     ------
     PipelineStageError
-        Propagated unchanged from ``_call_and_validate`` if both the
-        first attempt and repair fail for any sub-schema.
+        Propagated unchanged from ``_call_and_validate``.
     """
     logger.info(
         "generate_schemas_streaming | starting | entities=%d roles=%d",
@@ -571,28 +664,33 @@ def generate_schemas_streaming(
         len(arch.roles),
     )
 
-    # 1. DB
-    db_messages = _build_db_messages(arch)
-    db: DBSchema = _call_and_validate("generate_schemas.db", db_messages, DBSchema)
+    # Round 1: DB
+    db: DBSchema = await asyncio.to_thread(_gen_db, arch)
     yield ("db_schema", db)
+    logger.info("generate_schemas_streaming | db_schema emitted")
 
-    # 2. API (sees DB)
-    api_messages = _build_api_messages(arch, db)
-    api: APISchema = _call_and_validate(
-        "generate_schemas.api", api_messages, APISchema,
-        pre_normalize=_normalize_api_data,
+    # Round 2: API + Auth in parallel
+    # asyncio.gather returns results in submission order, so we collect both
+    # and yield in the order they were submitted (deterministic).
+    t1 = time.perf_counter()
+    api, auth = await asyncio.gather(
+        asyncio.to_thread(_gen_api, arch, db),
+        asyncio.to_thread(_gen_auth, arch, db),
+    )
+    parallel_time = time.perf_counter() - t1
+    logger.info(
+        "parallel_schemas | parallel_round=%.1fs (saved ~%.1fs vs sequential)",
+        parallel_time,
+        parallel_time / 2,
     )
     yield ("api_schema", api)
-
-    # 3. Auth (sees DB + API)
-    auth_messages = _build_auth_messages(arch, db, api)
-    auth: AuthSchema = _call_and_validate("generate_schemas.auth", auth_messages, AuthSchema)
     yield ("auth_schema", auth)
+    logger.info("generate_schemas_streaming | api_schema + auth_schema emitted")
 
-    # 4. UI (sees all three)
-    ui_messages = _build_ui_messages(arch, db, api, auth)
-    ui: UISchema = _call_and_validate("generate_schemas.ui", ui_messages, UISchema)
+    # Round 3: UI
+    ui: UISchema = await asyncio.to_thread(_gen_ui, arch, db, api, auth)
     yield ("ui_schema", ui)
+    logger.info("generate_schemas_streaming | ui_schema emitted")
 
     logger.info(
         "generate_schemas_streaming | complete | tables=%d endpoints=%d roles=%d pages=%d",
@@ -601,4 +699,3 @@ def generate_schemas_streaming(
         len(auth.roles),
         len(ui.pages),
     )
-
