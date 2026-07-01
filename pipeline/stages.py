@@ -45,10 +45,31 @@ def generate_schemas(arch: ArchitectureModel) -> SchemasResult:
     """
     Real implementation in pipeline/schema_gen.py (uses Groq API).
 
-    Returns a SchemasResult with .db, .api, .auth, .ui attributes.
+    Returns a SchemasResult with .db, .api, .auth, .ui attributes,
+    plus the generated DDL and its validation result.
     """
     from pipeline.schema_gen import generate_schemas as _real
-    return _real(arch)
+    from pipeline.ddl import generate_ddl, validate_ddl
+    
+    result = _real(arch)
+    result.ddl = generate_ddl(result.db)
+    result.ddl_validation = validate_ddl(result.ddl)
+    return result
+
+async def generate_schemas_parallel(arch: ArchitectureModel) -> SchemasResult:
+    """
+    Real implementation in pipeline/schema_gen.py (uses Groq API).
+
+    Returns a SchemasResult with .db, .api, .auth, .ui attributes,
+    plus the generated DDL and its validation result.
+    """
+    from pipeline.schema_gen import generate_schemas_parallel as _real
+    from pipeline.ddl import generate_ddl, validate_ddl
+    
+    result = await _real(arch)
+    result.ddl = generate_ddl(result.db)
+    result.ddl_validation = validate_ddl(result.ddl)
+    return result
 
 
 # ---------------------------------------------------------------------------

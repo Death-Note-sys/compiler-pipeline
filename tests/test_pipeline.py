@@ -210,3 +210,51 @@ class TestRefine:
         assert schemas_result.db.tables
         result = refine(schemas_result)
         assert isinstance(result, RefinementResult)
+
+# ---------------------------------------------------------------------------
+# Stage DDL - SQL Generation and Validation
+# ---------------------------------------------------------------------------
+
+from pipeline.ddl import generate_ddl, validate_ddl, DDLValidationResult
+from schemas.db import DBSchema, DBTable, DBColumn, ColumnType
+
+class TestDDLGeneration:
+    def test_generate_ddl(self, schemas_result):
+        ddl = generate_ddl(schemas_result.db)
+        assert isinstance(ddl, str)
+        assert "CREATE TABLE" in ddl
+        assert "PRAGMA foreign_keys = ON;" in ddl
+
+    def test_validate_ddl_success(self, schemas_result):
+        ddl = generate_ddl(schemas_result.db)
+        val = validate_ddl(ddl)
+        assert val.success is True
+        assert val.error is None
+        assert val.table_count == len(schemas_result.db.tables)
+
+    def test_validate_ddl_failure(self):
+        bad_ddl = "CREATE TABLE foo (bar INT" # Syntax error
+        val = validate_ddl(bad_ddl)
+        assert val.success is False
+        assert val.error is not None
+        assert val.table_count == 0
+
+    def test_table_ordering(self):
+        # Table A references Table B
+        # Expected order: Table B, then Table A
+        col_b = DBColumn(name="id", type="uuid")
+        table_b = DBTable(name="table_b", columns=[col_b])
+        
+        col_a = DBColumn(name="b_id", type="foreign_key", foreign_key="table_b.id")
+        table_a = DBTable(name="table_a", columns=[col_a])
+        
+        # Pass them in wrong order
+        db = DBSchema(tables=[table_a, table_b])
+        ddl = generate_ddl(db)
+        
+        pos_b = ddl.find("CREATE TABLE table_b")
+        pos_a = ddl.find("CREATE TABLE table_a")
+        
+        assert pos_b != -1
+        assert pos_a != -1
+        assert pos_b < pos_a # B must be created before A

@@ -30,10 +30,7 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 
-from pipeline.intent import extract_intent              # noqa: E402
-from pipeline.architecture import design_architecture   # noqa: E402
-from pipeline.schema_gen import generate_schemas        # noqa: E402
-from pipeline.refine import refine                      # noqa: E402
+from pipeline.stages import extract_intent, design_architecture, generate_schemas, refine
 
 
 def main() -> None:
@@ -62,6 +59,14 @@ def main() -> None:
 
     print("\n=== DB Schema ===")
     print(json.dumps(schemas.db.model_dump(by_alias=True), indent=2))
+
+    print("\n=== SQL DDL ===")
+    print(schemas.ddl)
+    if schemas.ddl_validation and schemas.ddl_validation.success:
+        print(f"\n✓ Validated against SQLite ({schemas.ddl_validation.table_count} tables)")
+    else:
+        err = schemas.ddl_validation.error if schemas.ddl_validation else "Unknown error"
+        print(f"\n✗ Validation failed: {err}")
 
     print("\n=== API Schema ===")
     print(json.dumps(schemas.api.model_dump(), indent=2))

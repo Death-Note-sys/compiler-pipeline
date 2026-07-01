@@ -10,7 +10,7 @@ consumers (tests, API, CLI) a single import location.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from schemas.db import DBSchema
@@ -18,15 +18,18 @@ if TYPE_CHECKING:
     from schemas.auth import AuthSchema
     from schemas.ui import UISchema
     from refine.consistency import ValidationError
+    from pipeline.ddl import DDLValidationResult
 
 
 @dataclass
 class SchemasResult:
-    """Named result from generate_schemas — avoids positional tuple unpacking errors."""
+    """Container for the four generated sub-schemas and DDL validation."""
     db: "DBSchema"
     api: "APISchema"
     auth: "AuthSchema"
     ui: "UISchema"
+    ddl: str = ""
+    ddl_validation: Optional["DDLValidationResult"] = None
 
 
 @dataclass

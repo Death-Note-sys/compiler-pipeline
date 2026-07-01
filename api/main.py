@@ -179,6 +179,7 @@ HTML_CONTENT = """<!DOCTYPE html>
     <details id="det-intent"><summary>Intent</summary><pre id="out-intent"></pre></details>
     <details id="det-arch"><summary>Architecture</summary><pre id="out-arch"></pre></details>
     <details id="det-db"><summary>DB Schema</summary><pre id="out-db"></pre></details>
+    <details id="det-ddl"><summary>SQL DDL <span id="ddl-badge" class="badge"></span></summary><pre id="out-ddl"></pre></details>
     <details id="det-api"><summary>API Schema</summary><pre id="out-api"></pre></details>
     <details id="det-auth"><summary>Auth Schema</summary><pre id="out-auth"></pre></details>
     <details id="det-ui"><summary>UI Schema</summary><pre id="out-ui"></pre></details>
@@ -204,7 +205,7 @@ document.getElementById('generateBtn').addEventListener('click', async () => {
   results.style.display = 'block';
 
   // Reset all sections to collapsed and clear content
-  ['intent','arch','db','api','auth','ui','refine'].forEach(id => {
+  ['intent','arch','db','ddl','api','auth','ui','refine'].forEach(id => {
     const det = document.getElementById('det-' + id);
     if (det) det.removeAttribute('open');
   });
@@ -257,9 +258,21 @@ document.getElementById('generateBtn').addEventListener('click', async () => {
           document.getElementById('out-arch').textContent = JSON.stringify(data, null, 2);
           document.getElementById('det-arch').setAttribute('open', '');
         } else if (stage === 'db_schema') {
-          loading.textContent = '⟳ Running: API Schema...';
+          loading.textContent = '⟳ Running: SQL DDL...';
           document.getElementById('out-db').textContent = JSON.stringify(data, null, 2);
           document.getElementById('det-db').setAttribute('open', '');
+        } else if (stage === 'ddl') {
+          loading.textContent = '⟳ Running: API Schema...';
+          const ddlBadge = document.getElementById('ddl-badge');
+          if (data.valid) {
+            ddlBadge.textContent = '✓ Valid SQL';
+            ddlBadge.className = 'badge success';
+          } else {
+            ddlBadge.textContent = '✗ Invalid';
+            ddlBadge.className = 'badge error';
+          }
+          document.getElementById('out-ddl').textContent = data.sql + (data.error ? '\n\nError: ' + data.error : '');
+          document.getElementById('det-ddl').setAttribute('open', '');
         } else if (stage === 'api_schema') {
           loading.textContent = '⟳ Running: Auth Schema...';
           document.getElementById('out-api').textContent = JSON.stringify(data, null, 2);
@@ -345,10 +358,7 @@ def generate(req: PromptRequest):
     Returns a JSON object with intent, architecture, schemas, and refinement results.
     Returns HTTP 422 if any pipeline stage raises a PipelineStageError.
     """
-    from pipeline.intent import extract_intent
-    from pipeline.architecture import design_architecture
-    from pipeline.schema_gen import generate_schemas
-    from pipeline.refine import refine
+    from pipeline.stages import extract_intent, design_architecture, generate_schemas, refine
 
     try:
         # Stage 1
@@ -378,6 +388,12 @@ def generate(req: PromptRequest):
             "api": schemas.api.model_dump(),
             "auth": schemas.auth.model_dump(),
             "ui": schemas.ui.model_dump(),
+        },
+        "ddl": {
+            "sql": schemas.ddl,
+            "valid": schemas.ddl_validation.success if schemas.ddl_validation else False,
+            "table_count": schemas.ddl_validation.table_count if schemas.ddl_validation else 0,
+            "error": schemas.ddl_validation.error if schemas.ddl_validation else None
         },
         "refinement": {
             "is_clean": refinement.is_clean,
@@ -434,11 +450,27 @@ async def generate_stream(req: PromptRequest):
             # Stage 3: Schema generation — parallel async streaming variant
             # generate_schemas_streaming is now an async generator; iterate it directly.
             # It runs DB solo (Round 1), then API+Auth in parallel (Round 2), then UI (Round 3).
+            from pipeline.ddl import generate_ddl, validate_ddl
             db = api = auth = ui = None
             async for stage_name, schema_obj in generate_schemas_streaming(arch):
                 if stage_name == "db_schema":
                     db = schema_obj
                     yield _sse({"stage": "db_schema", "data": schema_obj.model_dump(by_alias=True)})
+                    logger.info("SSE | emitted db_schema")
+                    
+                    # Intercept and generate DDL
+                    ddl_sql = await loop.run_in_executor(None, generate_ddl, db)
+                    ddl_val = await loop.run_in_executor(None, validate_ddl, ddl_sql)
+                    yield _sse({
+                        "stage": "ddl",
+                        "data": {
+                            "sql": ddl_sql,
+                            "valid": ddl_val.success,
+                            "table_count": ddl_val.table_count,
+                            "error": ddl_val.error
+                        }
+                    })
+                    logger.info("SSE | emitted ddl")
                 elif stage_name == "api_schema":
                     api = schema_obj
                     yield _sse({"stage": "api_schema", "data": schema_obj.model_dump()})
@@ -448,7 +480,8 @@ async def generate_stream(req: PromptRequest):
                 elif stage_name == "ui_schema":
                     ui = schema_obj
                     yield _sse({"stage": "ui_schema", "data": schema_obj.model_dump()})
-                logger.info("SSE | emitted %s", stage_name)
+                if stage_name != "db_schema":
+                    logger.info("SSE | emitted %s", stage_name)
 
             # Stage 4: Refine (pure Python, near-instant)
             schemas = SchemasResult(db=db, api=api, auth=auth, ui=ui)
