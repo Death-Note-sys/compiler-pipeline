@@ -265,3 +265,25 @@ class TestDDLGeneration:
         assert pos_b != -1
         assert pos_a != -1
         assert pos_b < pos_a # B must be created before A
+
+    def test_reserved_keyword_table_name(self):
+        # "order" is a reserved SQLite keyword — table name must be double-quoted
+        id_col = DBColumn(name="id", type="uuid")
+        item_col = DBColumn(name="name", type="string")
+        order_table = DBTable(name="order", columns=[id_col, item_col])
+
+        # A second table that references "order"
+        fk_col = DBColumn(name="order_id", type="foreign_key", foreign_key="order.id")
+        item_table = DBTable(name="item", columns=[DBColumn(name="id", type="uuid"), fk_col])
+
+        db = DBSchema(tables=[order_table, item_table])
+        ddl = generate_ddl(db)
+
+        # Generated DDL must quote the reserved name
+        assert 'CREATE TABLE "order"' in ddl
+        assert 'REFERENCES "order"' in ddl
+
+        # The DDL must execute without errors in SQLite
+        result = validate_ddl(ddl)
+        assert result.success is True, f"validate_ddl failed with: {result.error}"
+

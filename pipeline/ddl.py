@@ -8,6 +8,18 @@ from schemas.db import ColumnType, DBSchema, DBTable
 
 logger = logging.getLogger(__name__)
 
+# SQLite reserved words that cannot be used as bare table names.
+RESERVED = {
+    "order", "group", "index", "table", "select", "where",
+    "from", "create", "drop", "user", "key", "check",
+    "default", "values", "set", "by", "as", "on",
+}
+
+
+def _quote_name(name: str) -> str:
+    """Wrap a name in double-quotes if it is a reserved SQLite keyword."""
+    return f'"{name}"' if name.lower() in RESERVED else name
+
 @dataclass
 class DDLValidationResult:
     """Result of validating DDL against an in-memory SQLite database."""
@@ -86,7 +98,7 @@ def generate_ddl(db_schema: DBSchema) -> str:
     ordered_tables = _topological_sort_tables(db_schema)
     
     for table in ordered_tables:
-        lines.append(f"CREATE TABLE {table.name} (")
+        lines.append(f"CREATE TABLE {_quote_name(table.name)} (")
         col_defs = []
         fk_constraints = []
         
@@ -110,7 +122,7 @@ def generate_ddl(db_schema: DBSchema) -> str:
                 parts = col.foreign_key.split('.')
                 if len(parts) == 2:
                     ref_table, ref_col = parts
-                    fk_constraints.append(f"    FOREIGN KEY ({col.name}) REFERENCES {ref_table} ({ref_col})")
+                    fk_constraints.append(f"    FOREIGN KEY ({col.name}) REFERENCES {_quote_name(ref_table)} ({ref_col})")
                     
         # Combine column definitions and constraints
         all_defs = col_defs + fk_constraints
