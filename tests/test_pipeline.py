@@ -287,3 +287,43 @@ class TestDDLGeneration:
         result = validate_ddl(ddl)
         assert result.success is True, f"validate_ddl failed with: {result.error}"
 
+
+# ---------------------------------------------------------------------------
+# Rate Limit Helpers — zero LLM calls
+# ---------------------------------------------------------------------------
+
+from llm.groq_client import _parse_retry_after, _is_tpm_error, _is_daily_limit_error
+
+
+class TestRateLimitHelpers:
+    def test_parse_retry_after_seconds(self):
+        exc = Exception("Rate limit hit, try again in 30s")
+        assert _parse_retry_after(exc) == 30.0
+
+    def test_parse_retry_after_minutes(self):
+        exc = Exception("Rate limit hit, try again in 1m 30s")
+        assert _parse_retry_after(exc) == 90.0
+
+    def test_parse_retry_after_default(self):
+        exc = Exception("no timing info here")
+        assert _parse_retry_after(exc) == 60.0
+
+    def test_is_tpm_error_true(self):
+        exc = Exception("Error code: 429 - token_quota_exceeded")
+        assert _is_tpm_error(exc) is True
+
+    def test_is_tpm_error_tokens_per_minute(self):
+        exc = Exception("You have exceeded the tokens per minute limit")
+        assert _is_tpm_error(exc) is True
+
+    def test_is_tpm_error_false_for_daily(self):
+        exc = Exception("tokens per day limit reached")
+        assert _is_tpm_error(exc) is False
+
+    def test_is_daily_limit_error_true(self):
+        exc = Exception("You have exceeded the tokens per day limit")
+        assert _is_daily_limit_error(exc) is True
+
+    def test_is_daily_limit_error_false_for_tpm(self):
+        exc = Exception("Error code: 429 - token_quota_exceeded")
+        assert _is_daily_limit_error(exc) is False
